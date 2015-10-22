@@ -38,4 +38,4 @@ RUN mkdir build && cd build && ../configure
 WORKDIR /opt/build
 
 # build and cleanup in a single layer
-RUN make -j4 install && cd / && rm -rf /opt
+RUN make install && cd / && rm -rf /opt
