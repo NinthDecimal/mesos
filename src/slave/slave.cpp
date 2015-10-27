@@ -4586,6 +4586,8 @@ Future<ResourceUsage> Slave::usage()
       totalResources.get());
 
   // MA Send the new total to master
+  LOG(INFO) << "Updating total resources to "
+            << totalResources.get();
   send(master.get(), message);
 
   usage->mutable_total()->CopyFrom(totalResources.get());
