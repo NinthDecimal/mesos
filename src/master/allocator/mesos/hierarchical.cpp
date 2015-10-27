@@ -372,26 +372,43 @@ void HierarchicalAllocatorProcess::updateSlave(
   CHECK(initialized);
   CHECK(slaves.contains(slaveId));
 
-  // Check that all the oversubscribed resources are revocable.
-  CHECK_EQ(oversubscribed, oversubscribed.revocable());
+  // MA: We updtae the total non-revocable respurces as well
+  //     to account for non-mesos processes taking up respurces
+  if (oversubscribed == oversubscribed.revocable())
+  {
+    // Update the total resources with revocable resources
 
-  // Update the total resources.
+    // First remove the old oversubscribed resources from the total.
+    slaves[slaveId].total -= slaves[slaveId].total.revocable();
 
-  // First remove the old oversubscribed resources from the total.
-  slaves[slaveId].total -= slaves[slaveId].total.revocable();
+    // Now add the new estimate of oversubscribed resources.
+    slaves[slaveId].total += oversubscribed;
 
-  // Now add the new estimate of oversubscribed resources.
-  slaves[slaveId].total += oversubscribed;
+    // Now, update the total resources in the role sorter.
+    roleSorter->update(
+        slaveId,
+        slaves[slaveId].total.unreserved());
 
-  // Now, update the total resources in the role sorter.
-  roleSorter->update(
-      slaveId,
-      slaves[slaveId].total.unreserved());
+    LOG(INFO) << "Slave " << slaveId << " (" << slaves[slaveId].hostname << ")"
+              << " updated with oversubscribed resources " << oversubscribed
+              << " (total: " << slaves[slaveId].total
+              << ", allocated: " << slaves[slaveId].allocated << ")";
+  }
+  else
+  {
+    // MA If not revocable/oversubscribed - just update the total resources.
+    slaves[slaveId].total = oversubscribed;
 
-  LOG(INFO) << "Slave " << slaveId << " (" << slaves[slaveId].hostname << ")"
-            << " updated with oversubscribed resources " << oversubscribed
-            << " (total: " << slaves[slaveId].total
-            << ", allocated: " << slaves[slaveId].allocated << ")";
+    // Now, update the total resources in the role sorter.
+    roleSorter->update(
+        slaveId,
+        slaves[slaveId].total.unreserved());
+
+    LOG(INFO) << "Slave " << slaveId << " (" << slaves[slaveId].hostname << ")"
+              << " updated with resources " << oversubscribed
+              << " (total: " << slaves[slaveId].total
+              << ", allocated: " << slaves[slaveId].allocated << ")";
+  }
 
   allocate(slaveId);
 }

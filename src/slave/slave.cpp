@@ -962,6 +962,7 @@ void Slave::registered(
 
     send(master.get(), message);
   }
+  usage(); // MA Update the availible resources based of the currently avalible
 }
 
 
@@ -1039,6 +1040,7 @@ void Slave::reregistered(
 
     send(master.get(), message);
   }
+  usage(); // MA Update the availible resources based of the currently avalible
 
   // Reconcile any tasks per the master's request.
   foreach (const ReconcileTasksMessage& reconcile, reconciliations) {
@@ -3980,6 +3982,7 @@ void Slave::checkDiskUsage()
   // slave work directory is mounted.
   Future<double>(fs::usage(flags.work_dir))
     .onAny(defer(self(), &Slave::_checkDiskUsage, lambda::_1));
+  usage(); // MA Update the availible resources based of the currently avalible
 }
 
 
@@ -4559,6 +4562,31 @@ Future<ResourceUsage> Slave::usage()
     << "Failed to apply checkpointed resources "
     << checkpointedResources << " to slave's resources "
     << info.resources();
+
+  // MA Now we get the actual total availible free memory
+  Try<os::Memory> mem_ = os::memory();
+  Bytes free = mem_.get().free;
+  string FreeMemory = stringify(free.megabytes());
+
+  // MA Now we update the total availibele memory.
+  // First we add the FreeMemory memory to the totalResourcesMem
+  string totalResourcesMem = stringify(totalResources.get().mem()->megabytes());
+
+  totalResources.get() += Resources::parse("mem:" + FreeMemory).get();
+
+  // MA We subtract the previous total memory
+  totalResources.get() -= Resources::parse("mem:" + totalResourcesMem).get();
+
+  // MA Update the slave resources with new values
+  info.mutable_resources()->CopyFrom(totalResources.get());
+
+  UpdateSlaveMessage message;
+  message.mutable_slave_id()->CopyFrom(info.id());
+  message.mutable_oversubscribed_resources()->CopyFrom(
+      totalResources.get());
+
+  // MA Send the new total to master
+  send(master.get(), message);
 
   usage->mutable_total()->CopyFrom(totalResources.get());
 

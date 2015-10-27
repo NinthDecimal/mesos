@@ -3974,6 +3974,8 @@ void Master::reregisterSlave(
   machineId.set_hostname(slaveInfo.hostname());
   machineId.set_ip(stringify(from.address.ip));
 
+  LOG(INFO) << "MA reregisterSlave " << slaveInfo.id();
+
   // Slaves are not allowed to register while the machine they are on is in
   // 'DOWN` mode.
   if (machines.contains(machineId) &&
@@ -4290,6 +4292,10 @@ void Master::updateSlave(
 
   slave->totalResources -= slave->totalResources.revocable();
   slave->totalResources += oversubscribedResources.revocable();
+
+  // MA If the new resources are not revocable - update the total for this slave
+  if (oversubscribedResources != oversubscribedResources.revocable())
+    slave->totalResources = oversubscribedResources;
 
   // Now, update the allocator with the new estimate.
   allocator->updateSlave(slaveId, oversubscribedResources);
