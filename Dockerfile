@@ -1,30 +1,42 @@
-#
-# Dockerfile for building Mesos from source
-#
-# Create snapshot builds with:
-# docker build -t mesos/mesos:git-`git rev-parse --short HEAD` .
-#
-# Run master/slave with:
-# docker run mesos/mesos:git-`git rev-parse --short HEAD` mesos-master [options]
-# docker run mesos/mesos:git-`git rev-parse --short HEAD` mesos-slave [options]
-#
-FROM ubuntu:14.04
-MAINTAINER Gabriel Monroy <gabriel@opdemand.com>
+FROM flower.jiwiredev.com:5000/nined/mapr4-client:latest
+MAINTAINER fi@ninthdecimal.com
 
-# build packages
-ENV DEBIAN_FRONTEND noninteractive
-RUN apt-get update
-RUN apt-get install -yq build-essential autoconf libtool zlib1g-dev
-RUN apt-get install -yq libcurl4-nss-dev libsasl2-dev
-RUN apt-get install -yq openjdk-6-jdk maven
-RUN apt-get install -yq python-dev python-boto
-RUN apt-get install -yq libsvn-dev libapr1-dev
+# see https://mesosphere.io/learn/install_ubuntu_debian/#step-0
 
-# export environment
-ENV JAVA_HOME /usr/lib/jvm/java-6-openjdk-amd64
+WORKDIR /tmp
+ENV BUILD_MESOS_VERSION 0.24.0
 
-# include libmesos on library path
-ENV LD_LIBRARY_PATH /usr/local/lib
+# Fix missing library the Ubuntu Apache Maven 3 distribution
+# https://github.com/airbnb/chronos/issues/211
+RUN echo "APT update 2015-06-07" \
+ && apt-get update \
+ && apt-get install -y \
+    build-essential libyaml-dev libmysqlclient-dev libsqlite3-dev python-snappy python-boto python-dev libcurl4-nss-dev \
+    libsasl2-dev libsasl2-2 libsasl2-modules maven autoconf libtool \
+ && apt-get -y autoremove \
+ && apt-get -y clean all \
+ && apt-get -y autoclean all \
+ && rm -fr /tmp/* /var/tmp/ /root/.m2 \
+ && cd /usr/share/maven/lib \
+ && wget http://central.maven.org/maven2/commons-lang/commons-lang/2.6/commons-lang-2.6.jar
+
+
+RUN apt-get install -y libapr1 libsvn1 libapr1-dev libsvn-dev \
+                       mysql-client postgresql-client libevent-dev git subversion \
+ && apt-get -y autoremove \
+ && apt-get -y clean all \
+ && apt-get -y autoclean all \
+ && rm -fr /tmp/* /var/tmp/
+
+# install libnl from source so that we can enable network monitoring in mesos
+RUN cd /tmp \
+ && wget 'http://launchpad.net/ubuntu/+archive/primary/+files/libnl3_3.2.26.orig.tar.gz' \
+ && tar xvfz libnl3_3.2.26.orig.tar.gz \
+ && apt-get install -y bison flex \
+ && cd libnl-3.2.26 \
+ && ./configure && make && make install \
+ && cd / \
+ && rm -fr /tmp/*
 
 # copy local checkout into /opt
 ADD . /opt
@@ -33,9 +45,16 @@ WORKDIR /opt
 
 # configure
 RUN ./bootstrap
-RUN mkdir build && cd build && ../configure
+RUN mkdir build2 && cd build2 && ../configure
 
-WORKDIR /opt/build
+WORKDIR /opt/build2
 
 # build and cleanup in a single layer
-RUN make install && cd / && rm -rf /opt
+RUN ../configure --with-network-isolator \
+ && make -j`/usr/bin/nproc` \
+ && make install \
+ && apt-get remove -y libapr1-dev libsvn-dev \
+ && apt-get -y autoremove \
+ && apt-get -y clean all \
+ && apt-get -y autoclean all \
+ && cd / && rm -rf /opt
