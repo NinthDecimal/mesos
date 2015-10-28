@@ -38,6 +38,10 @@ RUN cd /tmp \
  && cd / \
  && rm -fr /tmp/*
 
+ # make the headers visible to the mesos build
+RUN cd /usr/include \
+ && ln -s /usr/local/include/libnl3
+
 # copy local checkout into /opt
 ADD . /opt
 
@@ -45,9 +49,9 @@ WORKDIR /opt
 
 # configure
 RUN ./bootstrap
-RUN mkdir build2 && cd build2 && ../configure
+RUN mkdir build && cd build && ../configure
 
-WORKDIR /opt/build2
+WORKDIR /opt/build
 
 # build and cleanup in a single layer
 RUN ../configure --with-network-isolator \
