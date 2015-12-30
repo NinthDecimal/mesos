@@ -4,7 +4,7 @@ MAINTAINER fi@ninthdecimal.com
 # see https://mesosphere.io/learn/install_ubuntu_debian/#step-0
 
 WORKDIR /tmp
-ENV BUILD_MESOS_VERSION 0.24.0
+ENV BUILD_MESOS_VERSION 0.26.0
 
 # Fix missing library the Ubuntu Apache Maven 3 distribution
 # https://github.com/airbnb/chronos/issues/211
@@ -49,7 +49,7 @@ WORKDIR /opt
 
 # configure
 RUN ./bootstrap
-RUN mkdir build && cd build && ../configure
+RUN rm -fr build && mkdir build && cd build && ../configure
 
 WORKDIR /opt/build
 
