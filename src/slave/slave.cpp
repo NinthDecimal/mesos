@@ -30,6 +30,12 @@
 #include <string>
 #include <vector>
 
+// MA imports for get_mem_free
+#include <fstream>
+#include <limits>
+#include <iostream>
+// MA imports for get_mem_free
+
 #include <mesos/type_utils.hpp>
 
 #include <mesos/module/authenticatee.hpp>
@@ -114,6 +120,29 @@ namespace slave {
 
 using namespace state;
 
+// MA In order to correctly calculate free mem we have to parse /proc/meminfo
+#ifdef __linux__
+unsigned long get_mem_free() {
+    std::string token;
+    std::ifstream file("/proc/meminfo");
+    unsigned long mem = 0;
+    unsigned long temp = 0;
+    while(file >> token) {
+        if(token == "MemFree:" || token == "Cached:") {
+            std::cout << token << " ";
+            if(file >> temp) {
+                std::cout << temp << std::endl;
+                mem += temp; // add free and cached ram
+            } else {
+                return 0; // memeory info not found
+            }
+        }
+        // ignore rest of the line
+        file.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+    }
+    return mem; // return the total available memeory
+}
+#endif // __linux__
 
 Slave::Slave(const slave::Flags& _flags,
              MasterDetector* _detector,
@@ -4616,6 +4645,9 @@ Future<ResourceUsage> Slave::usage()
   // MA Now we get the actual total availible free memory
   Try<os::Memory> mem_ = os::memory();
   Bytes free = mem_.get().free;
+  #ifdef __linux__
+  free = Bytes(get_mem_free() * 1000); // /proc/meminfo gives result in kB
+  #endif // __linux__
   string FreeMemory = stringify(free.megabytes());
 
   // MA Now we update the total availibele memory.
