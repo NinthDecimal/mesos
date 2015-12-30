@@ -51,7 +51,7 @@ string serialize(
       return message.SerializeAsString();
     }
     case ContentType::JSON: {
-      JSON::Object object = JSON::Protobuf(message);
+      JSON::Object object = JSON::protobuf(message);
       return stringify(object);
     }
   }
@@ -153,12 +153,7 @@ JSON::Object model(const Attributes& attributes)
 
 JSON::Array model(const Labels& labels)
 {
-  JSON::Array array;
-  array.values.reserve(labels.labels().size()); // MESOS-2353.
-  foreach (const Label& label, labels.labels()) {
-    array.values.push_back(JSON::Protobuf(label));
-  }
-  return array;
+  return JSON::protobuf(labels.labels());
 }
 
 
@@ -181,6 +176,15 @@ JSON::Object model(const NetworkInfo& info)
 
   if (info.has_labels()) {
     object.values["labels"] = std::move(model(info.labels()));
+  }
+
+  if (info.ip_addresses().size() > 0) {
+    JSON::Array array;
+    array.values.reserve(info.ip_addresses().size()); // MESOS-2353.
+    foreach (const NetworkInfo::IPAddress& ipAddress, info.ip_addresses()) {
+      array.values.push_back(JSON::protobuf(ipAddress));
+    }
+    object.values["ip_addresses"] = std::move(array);
   }
 
   return object;
@@ -217,6 +221,10 @@ JSON::Object model(const TaskStatus& status)
 
   if (status.has_container_status()) {
     object.values["container_status"] = model(status.container_status());
+  }
+
+  if (status.has_healthy()) {
+    object.values["healthy"] = status.healthy();
   }
 
   return object;
@@ -256,7 +264,7 @@ JSON::Object model(const Task& task)
   }
 
   if (task.has_discovery()) {
-    object.values["discovery"] = JSON::Protobuf(task.discovery());
+    object.values["discovery"] = JSON::protobuf(task.discovery());
   }
 
   return object;
@@ -314,7 +322,6 @@ JSON::Object model(const ExecutorInfo& executorInfo)
   JSON::Object object;
   object.values["executor_id"] = executorInfo.executor_id().value();
   object.values["name"] = executorInfo.name();
-  object.values["data"] = executorInfo.data();
   object.values["framework_id"] = executorInfo.framework_id().value();
   object.values["command"] = model(executorInfo.command());
   object.values["resources"] = model(executorInfo.resources());
@@ -359,7 +366,7 @@ JSON::Object model(
   }
 
   if (task.has_discovery()) {
-    object.values["discovery"] = JSON::Protobuf(task.discovery());
+    object.values["discovery"] = JSON::protobuf(task.discovery());
   }
 
   return object;

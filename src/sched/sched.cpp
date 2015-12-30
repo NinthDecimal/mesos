@@ -900,8 +900,9 @@ protected:
     // update uuid check here, until then we must still check for
     // this being sent from the driver (from == UPID()) or from
     // the master (pid == UPID()).
-    // TODO(vinod): Get rid of this logic in 0.25.0 because master
-    // and slave correctly set task status in 0.24.0.
+    //
+    // TODO(vinod): Get rid of this logic in 0.27.0 because master
+    // correctly sets task status since 0.26.0.
     if (!update.has_uuid() || update.uuid() == "") {
       status.clear_uuid();
     } else if (from == UPID() || pid == UPID()) {
@@ -1228,6 +1229,29 @@ protected:
 
     // Setting accept.filters.
     accept->mutable_filters()->CopyFrom(filters);
+
+    CHECK_SOME(master);
+    send(master.get().pid(), call);
+  }
+
+  void declineOffer(
+      const OfferID& offerId,
+      const Filters& filters)
+  {
+    if (!connected) {
+      VLOG(1) << "Ignoring decline offer message as master is disconnected";
+      return;
+    }
+
+    Call call;
+
+    CHECK(framework.has_id());
+    call.mutable_framework_id()->CopyFrom(framework.id());
+    call.set_type(Call::DECLINE);
+
+    Call::Decline* decline = call.mutable_decline();
+    decline->add_offer_ids()->CopyFrom(offerId);
+    decline->mutable_filters()->CopyFrom(filters);
 
     CHECK_SOME(master);
     send(master.get().pid(), call);
@@ -1938,10 +1962,21 @@ Status MesosSchedulerDriver::declineOffer(
     const OfferID& offerId,
     const Filters& filters)
 {
-  vector<OfferID> offerIds;
-  offerIds.push_back(offerId);
+  synchronized (mutex) {
+    if (status != DRIVER_RUNNING) {
+      return status;
+    }
 
-  return launchTasks(offerIds, vector<TaskInfo>(), filters);
+    CHECK(process != NULL);
+
+    dispatch(
+        process,
+        &SchedulerProcess::declineOffer,
+        offerId,
+        filters);
+
+    return status;
+  }
 }
 
 

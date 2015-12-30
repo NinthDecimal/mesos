@@ -751,6 +751,14 @@ cat <<__EOF__ >crammd5_installed.c [
 #include <sasl/saslplug.h>
 #include <sasl/saslutil.h>
 
+// We need to disable the deprecation warnings as Apple has decided
+// to deprecate all of CyrusSASL's functions with OS 10.11
+// (see MESOS-3030). We are using GCC pragmas also for covering clang.
+#ifdef __APPLE__
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#endif
+
 static void search_crammd5(
   client_sasl_mechanism_t *m,
   sasl_info_callback_stage_t stage,
@@ -775,6 +783,10 @@ int main(int argc, char** argv)
   sasl_client_plugin_info(NULL, &search_crammd5, NULL);
   return 0;
 }]
+
+#ifdef __APPLE__
+#pragma GCC diagnostic pop
+#endif
 __EOF__
 
 # Build the SASL client check test binary. Prevent the use of possibly
@@ -1407,12 +1419,21 @@ if test "x$without_bundled_protobuf" = "xyes" || \
   fi
 
   # Check for protobuf.
-  # TODO(jieyu): Symbol _init is not available for libs on OS X.
-  # Consider checking lib using AX_CXX_CHECK_LIB.
-  AC_CHECK_HEADERS([google/protobuf/message.h],
-                   [AC_CHECK_LIB([protobuf],
-                                 [_init],
-                                 [found_protobuf=yes])])
+
+  AC_CHECK_HEADERS([google/protobuf/message.h], [found_protobuf=yes],
+                   [found_protobuf=no])
+
+  if test "x$found_protobuf" = "xyes"; then
+    saved_LIBS="$LIBS"
+    LIBS="-lprotobuf $LIBS"
+    AC_LANG_PUSH([C++])
+    AC_LINK_IFELSE([AC_LANG_PROGRAM([#include <google/protobuf/stubs/common.h>],
+                    [ google::protobuf::ShutdownProtobufLibrary(); ])],
+            [ found_protobuf=yes ],
+            [ found_protobuf=no ])
+    AC_LANG_POP()
+    LIBS="$saved_LIBS"
+  fi
 
   if test "x$found_protobuf" = "xyes"; then
     with_bundled_protobuf=no
@@ -1484,12 +1505,12 @@ if test "x$enable_libevent" = "xyes"; then
                                  [],
                                  [AC_MSG_ERROR([cannot find libevent
 -------------------------------------------------------------------
-libevent is required for libprocess to build.
+libevent version 2+ is required for libprocess to build.
 -------------------------------------------------------------------
                                  ])])],
                    [AC_MSG_ERROR([cannot find libevent headers
 -------------------------------------------------------------------
-libevent is required for libprocess to build.
+libevent version 2+ headers are required for libprocess to build.
 -------------------------------------------------------------------
   ])])
 
@@ -1499,12 +1520,12 @@ libevent is required for libprocess to build.
                                  [],
                                  [AC_MSG_ERROR([cannot find libevent_pthreads
 -------------------------------------------------------------------
-libevent_pthreads is required for libprocess to build.
+libevent_pthreads version 2+ is required for libprocess to build.
 -------------------------------------------------------------------
                                  ])])],
                    [AC_MSG_ERROR([cannot find libevent_pthreads headers
 -------------------------------------------------------------------
-libevent_pthreads is required for libprocess to build.
+libevent_pthreads version 2+ headers are required for libprocess to build.
 -------------------------------------------------------------------
   ])])
 fi
@@ -1556,12 +1577,12 @@ libcrypto is required for an SSL-enabled build.
                                    [],
                                    [AC_MSG_ERROR([cannot find libevent_openssl
 -------------------------------------------------------------------
-libevent_openssl is required for an SSL-enabled build.
+libevent_openssl version 2+ is required for an SSL-enabled build.
 -------------------------------------------------------------------
                                    ])])],
                      [AC_MSG_ERROR([cannot find libevent_openssl headers
 -------------------------------------------------------------------
-libevent_openssl is required for an SSL-enabled build.
+libevent_openssl version 2+ headers are required for an SSL-enabled build.
 -------------------------------------------------------------------
     ])])
   else

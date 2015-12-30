@@ -29,8 +29,8 @@ PROTOC_TO_INCLUDE_DIR(V1_EXECUTOR      mesos/v1/executor/executor)
 PROTOC_TO_INCLUDE_DIR(FETCHER          mesos/fetcher/fetcher)
 PROTOC_TO_INCLUDE_DIR(MAINTENANCE      mesos/maintenance/maintenance)
 PROTOC_TO_INCLUDE_DIR(ALLOCATOR        mesos/master/allocator)
-PROTOC_TO_INCLUDE_DIR(QUOTA            mesos/master/quota)
 PROTOC_TO_INCLUDE_DIR(MODULE           mesos/module/module)
+PROTOC_TO_INCLUDE_DIR(QUOTA            mesos/quota/quota)
 PROTOC_TO_INCLUDE_DIR(SCHEDULER        mesos/scheduler/scheduler)
 PROTOC_TO_INCLUDE_DIR(V1_SCHEDULER     mesos/v1/scheduler/scheduler)
 PROTOC_TO_INCLUDE_DIR(ISOLATOR         mesos/slave/isolator)
@@ -42,7 +42,7 @@ PROTOC_TO_SRC_DIR(MESSAGES messages/messages)
 PROTOC_TO_SRC_DIR(FLAGS    messages/flags)
 PROTOC_TO_SRC_DIR(STATE    messages/state)
 
-PROTOC_TO_SRC_DIR(MESSAGE slave/containerizer/provisioner/docker/message)
+PROTOC_TO_SRC_DIR(MESSAGE slave/containerizer/mesos/provisioner/docker/message)
 
 set(MESOS_PROTOBUF_SRC
   ${MESOS_PROTO_CC}
@@ -55,8 +55,8 @@ set(MESOS_PROTOBUF_SRC
   ${FETCHER_PROTO_CC}
   ${MAINTENANCE_PROTO_CC}
   ${ALLOCATOR_PROTO_CC}
-  ${QUOTA_PROTO_CC}
   ${MODULE_PROTO_CC}
+  ${QUOTA_PROTO_CC}
   ${SCHEDULER_PROTO_CC}
   ${V1_SCHEDULER_PROTO_CC}
   ${OVERSUBSCRIPTION_PROTO_CC}
@@ -183,6 +183,7 @@ if (NOT WIN32)
     slave/slave.cpp
     slave/state.cpp
     slave/status_update_manager.cpp
+    slave/validation.cpp
     slave/containerizer/containerizer.cpp
     slave/containerizer/composing.cpp
     slave/containerizer/composing.hpp
@@ -191,23 +192,25 @@ if (NOT WIN32)
     slave/containerizer/external_containerizer.cpp
     slave/containerizer/fetcher.cpp
     slave/containerizer/isolator.cpp
-    slave/containerizer/isolators/filesystem/posix.cpp
-    slave/containerizer/isolators/posix/disk.cpp
+    slave/containerizer/mesos/isolators/filesystem/posix.cpp
+    slave/containerizer/mesos/isolators/posix/disk.cpp
     slave/containerizer/launcher.cpp
     slave/containerizer/mesos/containerizer.cpp
     slave/containerizer/mesos/launch.cpp
-    slave/containerizer/provisioner/paths.cpp
-    slave/containerizer/provisioner/provisioner.cpp
-    slave/containerizer/provisioner/store.cpp
-    slave/containerizer/provisioner/appc/paths.cpp
-    slave/containerizer/provisioner/appc/spec.cpp
-    slave/containerizer/provisioner/appc/store.cpp
-    slave/containerizer/provisioner/backend.cpp
-    slave/containerizer/provisioner/backends/copy.cpp
-    slave/containerizer/provisioner/docker/message.proto
-    slave/containerizer/provisioner/docker/registry_client.cpp
-    slave/containerizer/provisioner/docker/spec.cpp
-    slave/containerizer/provisioner/docker/token_manager.cpp
+    slave/containerizer/mesos/mount.cpp
+    slave/containerizer/mesos/provisioner/paths.cpp
+    slave/containerizer/mesos/provisioner/provisioner.cpp
+    slave/containerizer/mesos/provisioner/store.cpp
+    slave/containerizer/mesos/provisioner/appc/paths.cpp
+    slave/containerizer/mesos/provisioner/appc/spec.cpp
+    slave/containerizer/mesos/provisioner/appc/store.cpp
+    slave/containerizer/mesos/provisioner/backend.cpp
+    slave/containerizer/mesos/provisioner/backends/copy.cpp
+    slave/containerizer/mesos/provisioner/docker/message.proto
+    slave/containerizer/mesos/provisioner/docker/registry_client.cpp
+    slave/containerizer/mesos/provisioner/docker/remote_puller.cpp
+    slave/containerizer/mesos/provisioner/docker/spec.cpp
+    slave/containerizer/mesos/provisioner/docker/token_manager.cpp
     slave/resource_estimators/noop.cpp
     )
 endif (NOT WIN32)

@@ -56,8 +56,35 @@ mesos::internal::slave::Flags::Flags()
   // TODO(benh): Is there a way to specify units for the resources?
   add(&Flags::resources,
       "resources",
-      "Total consumable resources per slave, in\n"
-      "the form 'name(role):value;name(role):value...'.");
+      "Total consumable resources per slave. Can be provided in JSON format\n"
+      "or as a semicolon-delimited list of key:value pairs, with the role\n"
+      "optionally specified.\n"
+      "\n"
+      "As a key:value list:\n"
+      "name(role):value;name:value...\n"
+      "\n"
+      "To use JSON, pass a JSON-formatted string or use --resources=filepath\n"
+      "to specify the resources via a file containing a JSON-formatted\n"
+      "string. 'filepath' can be of the form 'file:///path/to/file' or\n"
+      "'/path/to/file'.\n"
+      "\n"
+      "Example JSON:\n"
+      "[\n"
+      "  {\n"
+      "    \"name\": \"cpus\",\n"
+      "    \"type\": \"SCALAR\",\n"
+      "    \"scalar\": {\n"
+      "      \"value\": 24\n"
+      "    }\n"
+      "  },\n"
+      "  {\n"
+      "    \"name\": \"mem\",\n"
+      "    \"type\": \"SCALAR\",\n"
+      "    \"scalar\": {\n"
+      "      \"value\": 24576\n"
+      "    }\n"
+      "  }\n"
+      "]");
 
   add(&Flags::isolation,
       "isolation",
@@ -79,7 +106,7 @@ mesos::internal::slave::Flags::Flags()
 
   add(&Flags::image_providers,
       "image_providers",
-      "Comma separated list of supported image providers,\n"
+      "Comma-separated list of supported image providers,\n"
       "e.g., 'APPC,DOCKER'.");
 
   add(&Flags::image_provisioner_backend,
@@ -93,19 +120,44 @@ mesos::internal::slave::Flags::Flags()
       "Directory the appc provisioner will store images in.",
       "/tmp/mesos/store/appc");
 
+  add(&Flags::docker_auth_server,
+      "docker_auth_server",
+      "Docker authentication server",
+      "auth.docker.io");
+
+  add(&Flags::docker_auth_server_port,
+      "docker_auth_server_port",
+      "Docker authentication server port",
+      "443");
+
   add(&Flags::docker_local_archives_dir,
       "docker_local_archives_dir",
-      "Directory for docker local puller to look in for image archives",
+      "Directory for Docker local puller to look in for image archives",
       "/tmp/mesos/images/docker");
 
   add(&Flags::docker_puller,
       "docker_puller",
-      "Strategy for docker puller to fetch images",
+      "Strategy for Docker puller to fetch images",
       "local");
+
+  add(&Flags::docker_puller_timeout_secs,
+      "docker_puller_timeout",
+      "Timeout in seconds for pulling images from the Docker registry",
+      "60");
+
+  add(&Flags::docker_registry,
+      "docker_registry",
+      "Default Docker image registry server host",
+      "registry-1.docker.io");
+
+  add(&Flags::docker_registry_port,
+      "docker_registry_port",
+      "Default Docker registry server port",
+      "443");
 
   add(&Flags::docker_store_dir,
       "docker_store_dir",
-      "Directory the docker provisioner will store images in",
+      "Directory the Docker provisioner will store images in",
       "/tmp/mesos/store/docker");
 
   add(&Flags::default_role,
@@ -147,7 +199,9 @@ mesos::internal::slave::Flags::Flags()
 
   add(&Flags::launcher_dir, // TODO(benh): This needs a better name.
       "launcher_dir",
-      "Directory path of Mesos binaries",
+      "Directory path of Mesos binaries. Mesos would find health-check,\n"
+      "fetcher, containerizer and executor binary files under this\n"
+      "directory.",
       PKGLIBEXECDIR);
 
   add(&Flags::hadoop_home,
@@ -348,8 +402,8 @@ mesos::internal::slave::Flags::Flags()
 
   add(&Flags::firewall_rules,
       "firewall_rules",
-      "The value could be a JSON formatted string of rules or a\n"
-      "file path containing the JSON formated rules used in the endpoints\n"
+      "The value could be a JSON-formatted string of rules or a\n"
+      "file path containing the JSON-formatted rules used in the endpoints\n"
       "firewall. Path must be of the form 'file:///path/to/file'\n"
       "or '/path/to/file'.\n"
       "\n"
@@ -370,8 +424,8 @@ mesos::internal::slave::Flags::Flags()
       "Either a path to a text with a single line\n"
       "containing 'principal' and 'secret' separated by "
       "whitespace.\n"
-      "Or a path containing the JSON "
-      "formatted information used for one credential.\n"
+      "Or a path containing the JSON-formatted "
+      "information used for one credential.\n"
       "Path could be of the form 'file:///path/to/file' or '/path/to/file'."
       "\n"
       "Example:\n"
@@ -387,7 +441,7 @@ mesos::internal::slave::Flags::Flags()
 
   add(&Flags::containerizers,
       "containerizers",
-      "Comma separated list of containerizer implementations\n"
+      "Comma-separated list of containerizer implementations\n"
       "to compose in order to provide containerization.\n"
       "Available options are 'mesos', 'external', and\n"
       "'docker' (on Linux). The order the containerizers\n"
@@ -447,7 +501,7 @@ mesos::internal::slave::Flags::Flags()
 
   add(&Flags::default_container_info,
       "default_container_info",
-      "JSON formatted ContainerInfo that will be included into\n"
+      "JSON-formatted ContainerInfo that will be included into\n"
       "any ExecutorInfo that does not specify a ContainerInfo.\n"
       "\n"
       "See the ContainerInfo protobuf in mesos.proto for\n"
@@ -547,7 +601,7 @@ mesos::internal::slave::Flags::Flags()
       "subsystems.\n"
       "\n"
       "Use --modules=filepath to specify the list of modules via a\n"
-      "file containing a JSON formatted string. 'filepath' can be\n"
+      "file containing a JSON-formatted string. 'filepath' can be\n"
       "of the form 'file:///path/to/file' or '/path/to/file'.\n"
       "\n"
       "Use --modules=\"{...}\" to specify the list of modules inline.\n"
@@ -594,7 +648,7 @@ mesos::internal::slave::Flags::Flags()
 
   add(&Flags::hooks,
       "hooks",
-      "A comma separated list of hook modules to be\n"
+      "A comma-separated list of hook modules to be\n"
       "installed inside the slave.");
 
   add(&Flags::resource_estimator,

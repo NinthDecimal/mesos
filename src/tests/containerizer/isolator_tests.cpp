@@ -18,11 +18,11 @@
 
 #include <unistd.h>
 
-#include <gmock/gmock.h>
-
 #include <iostream>
 #include <string>
 #include <vector>
+
+#include <gmock/gmock.h>
 
 #include <mesos/resources.hpp>
 
@@ -50,13 +50,13 @@
 #include "slave/slave.hpp"
 
 #ifdef __linux__
-#include "slave/containerizer/isolators/cgroups/constants.hpp"
-#include "slave/containerizer/isolators/cgroups/cpushare.hpp"
-#include "slave/containerizer/isolators/cgroups/mem.hpp"
-#include "slave/containerizer/isolators/cgroups/perf_event.hpp"
-#include "slave/containerizer/isolators/filesystem/shared.hpp"
+#include "slave/containerizer/mesos/isolators/cgroups/constants.hpp"
+#include "slave/containerizer/mesos/isolators/cgroups/cpushare.hpp"
+#include "slave/containerizer/mesos/isolators/cgroups/mem.hpp"
+#include "slave/containerizer/mesos/isolators/cgroups/perf_event.hpp"
+#include "slave/containerizer/mesos/isolators/filesystem/shared.hpp"
 #endif // __linux__
-#include "slave/containerizer/isolators/posix.hpp"
+#include "slave/containerizer/mesos/isolators/posix.hpp"
 
 #include "slave/containerizer/launcher.hpp"
 #ifdef __linux__
@@ -444,7 +444,7 @@ TEST_F(RevocableCpuIsolatorTest, ROOT_CGROUPS_RevocableCpu)
 class LimitedCpuIsolatorTest : public MesosTest {};
 
 
-TEST_F(LimitedCpuIsolatorTest, ROOT_CGROUPS_Cfs)
+TEST_F(LimitedCpuIsolatorTest, ROOT_CGROUPS_CFS_Enable_Cfs)
 {
   slave::Flags flags;
 
@@ -558,7 +558,7 @@ TEST_F(LimitedCpuIsolatorTest, ROOT_CGROUPS_Cfs)
 // observed in MESOS-1049.
 // TODO(vinod): Revisit this if/when the isolator restricts the number
 // of cpus that an executor can use based on the slave cpus.
-TEST_F(LimitedCpuIsolatorTest, ROOT_CGROUPS_Cfs_Big_Quota)
+TEST_F(LimitedCpuIsolatorTest, ROOT_CGROUPS_CFS_Big_Quota)
 {
   slave::Flags flags;
 
@@ -689,14 +689,12 @@ TEST_F(LimitedCpuIsolatorTest, ROOT_CGROUPS_Pids_and_Tids)
   int pipes[2];
   ASSERT_NE(-1, ::pipe(pipes));
 
-  vector<string> argv(3);
-  argv[0] = "sh";
-  argv[1] = "-c";
-  argv[2] = "while true; do sleep 1; done;";
+  vector<string> argv(1);
+  argv[0] = "cat";
 
   Try<pid_t> pid = launcher.get()->fork(
       containerId,
-      "sh",
+      "cat",
       argv,
       Subprocess::FD(STDIN_FILENO),
       Subprocess::FD(STDOUT_FILENO),
@@ -1185,11 +1183,14 @@ const string UNPRIVILEGED_USERNAME = "mesos.test.unprivileged.user";
 
 
 template <typename T>
-class UserCgroupIsolatorTest : public MesosTest
+class UserCgroupIsolatorTest
+  : public ContainerizerTest<slave::MesosContainerizer>
 {
 public:
   static void SetUpTestCase()
   {
+    ContainerizerTest<slave::MesosContainerizer>::SetUpTestCase();
+
     // Remove the user in case it wasn't cleaned up from a previous
     // test.
     os::system("userdel -r " + UNPRIVILEGED_USERNAME + " > /dev/null");
@@ -1200,6 +1201,8 @@ public:
 
   static void TearDownTestCase()
   {
+    ContainerizerTest<slave::MesosContainerizer>::TearDownTestCase();
+
     ASSERT_EQ(0, os::system("userdel -r " + UNPRIVILEGED_USERNAME));
   }
 };
@@ -1217,7 +1220,7 @@ TYPED_TEST_CASE(UserCgroupIsolatorTest, CgroupsIsolatorTypes);
 
 TYPED_TEST(UserCgroupIsolatorTest, ROOT_CGROUPS_UserCgroup)
 {
-  slave::Flags flags;
+  slave::Flags flags = UserCgroupIsolatorTest<TypeParam>::CreateSlaveFlags();
   flags.perf_events = "cpu-cycles"; // Needed for CgroupsPerfEventIsolator.
 
   Try<Isolator*> isolator = TypeParam::create(flags);

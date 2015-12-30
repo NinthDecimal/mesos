@@ -29,15 +29,15 @@
 #include <stout/stringify.hpp>
 #include <stout/uuid.hpp>
 
+#include <stout/tests/utils.hpp>
+
 #include "slave/paths.hpp"
 
-#include "slave/containerizer/provisioner/paths.hpp"
-#include "slave/containerizer/provisioner/provisioner.hpp"
+#include "slave/containerizer/mesos/provisioner/paths.hpp"
+#include "slave/containerizer/mesos/provisioner/provisioner.hpp"
 
-#include "slave/containerizer/provisioner/appc/spec.hpp"
-#include "slave/containerizer/provisioner/appc/store.hpp"
-
-#include "tests/utils.hpp"
+#include "slave/containerizer/mesos/provisioner/appc/spec.hpp"
+#include "slave/containerizer/mesos/provisioner/appc/store.hpp"
 
 using std::list;
 using std::string;

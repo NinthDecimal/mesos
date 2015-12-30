@@ -52,6 +52,10 @@
 #include "common/http.hpp"
 #include "common/status_utils.hpp"
 
+#ifdef __linux__
+#include "linux/fs.hpp"
+#endif
+
 #include "logging/logging.hpp"
 
 #include "messages/messages.hpp"
@@ -76,7 +80,11 @@ using namespace process;
 class CommandExecutorProcess : public ProtobufProcess<CommandExecutorProcess>
 {
 public:
-  CommandExecutorProcess(Option<char**> override, const string& _healthCheckDir)
+  CommandExecutorProcess(
+      const Option<char**>& override,
+      const string& _healthCheckDir,
+      const Option<string>& _sandboxDirectory,
+      const Option<string>& _user)
     : launched(false),
       killed(false),
       killedByHealthCheck(false),
@@ -85,13 +93,15 @@ public:
       escalationTimeout(slave::EXECUTOR_SIGNAL_ESCALATION_TIMEOUT),
       driver(None()),
       healthCheckDir(_healthCheckDir),
-      override(override) {}
+      override(override),
+      sandboxDirectory(_sandboxDirectory),
+      user(_user) {}
 
   virtual ~CommandExecutorProcess() {}
 
   void registered(
       ExecutorDriver* _driver,
-      const ExecutorInfo& executorInfo,
+      const ExecutorInfo& _executorInfo,
       const FrameworkInfo& frameworkInfo,
       const SlaveInfo& slaveInfo)
   {
@@ -169,6 +179,61 @@ public:
       abort();
     }
 
+    Option<string> rootfs;
+    if (sandboxDirectory.isSome()) {
+      // If 'sandbox_diretory' is specified, that means the user
+      // task specifies a root filesystem, and that root filesystem has
+      // already been prepared at COMMAND_EXECUTOR_ROOTFS_CONTAINER_PATH.
+      // The command executor is reponsible for mounting the sandbox
+      // into the root filesystem, chrooting into it and changing the
+      // user before exec-ing the user process.
+#ifdef __linux__
+      Result<string> user = os::user();
+      if (user.isError()) {
+        cerr << "Failed to get current user: " << user.error() << endl;
+        abort();
+      } else if (user.isNone()) {
+        cerr << "Current username is not found" << endl;
+        abort();
+      } else if (user.get() != "root") {
+        cerr << "The command executor requires root with rootfs" << endl;
+        abort();
+      }
+
+      rootfs = path::join(
+          os::getcwd(), COMMAND_EXECUTOR_ROOTFS_CONTAINER_PATH);
+
+      string sandbox = path::join(rootfs.get(), sandboxDirectory.get());
+      if (!os::exists(sandbox)) {
+        Try<Nothing> mkdir = os::mkdir(sandbox);
+        if (mkdir.isError()) {
+          cerr << "Failed to create sandbox mount point  at '"
+               << sandbox << "': " << mkdir.error() << endl;
+          abort();
+        }
+      }
+
+      // Mount the sandbox into the container rootfs.
+      // NOTE: We don't use MS_REC here because the rootfs is already
+      // under the sandbox.
+      Try<Nothing> mount = fs::mount(
+          os::getcwd(),
+          sandbox,
+          None(),
+          MS_BIND,
+          NULL);
+
+      if (mount.isError()) {
+        cerr << "Unable to mount the work directory into container "
+             << "rootfs: " << mount.error() << endl;;
+        abort();
+      }
+#else
+      cerr << "Not expecting root volume with non-linux platform." << endl;
+      abort();
+#endif // __linux__
+    }
+
     // Prepare the argv before fork as it's not async signal safe.
     char **argv = new char*[task.command().arguments().size() + 1];
     for (int i = 0; i < task.command().arguments().size(); i++) {
@@ -230,6 +295,48 @@ public:
       }
 
       os::close(pipes[1]);
+
+      if (rootfs.isSome()) {
+#ifdef __linux__
+        if (user.isSome()) {
+          // This is a work around to fix the problem that after we chroot
+          // os::su call afterwards failed because the linker may not be
+          // able to find the necessary library in the rootfs.
+          // We call os::su before chroot here to force the linker to load
+          // into memory.
+          // We also assume it's safe to su to "root" user since
+          // filesystem/linux.cpp checks for root already.
+          os::su("root");
+        }
+
+        Try<Nothing> chroot = fs::chroot::enter(rootfs.get());
+        if (chroot.isError()) {
+          cerr << "Failed to enter chroot '" << rootfs.get()
+               << "': " << chroot.error() << endl;;
+          abort();
+        }
+
+        Try<Nothing> chdir = os::chdir(sandboxDirectory.get());
+        if (chdir.isError()) {
+          cerr << "Failed to change directory to sandbox dir '"
+               << sandboxDirectory.get() << "': " << chdir.error();
+          abort();
+        }
+
+        if (user.isSome()) {
+          Try<Nothing> su = os::su(user.get());
+          if (su.isError()) {
+            cerr << "Failed to change user to '" << user.get() << "': "
+                 << su.error() << endl;
+            abort();
+          }
+        }
+#else
+        cerr << "Rootfs is only supported on Linux" << endl;
+        abort();
+#endif // __linux__
+      }
+
 
       cout << command << endl;
 
@@ -456,7 +563,7 @@ private:
   void launchHealthCheck(const TaskInfo& task)
   {
     if (task.has_health_check()) {
-      JSON::Object json = JSON::Protobuf(task.health_check());
+      JSON::Object json = JSON::protobuf(task.health_check());
 
       // Launch the subprocess using 'exec' style so that quotes can
       // be properly handled.
@@ -501,15 +608,22 @@ private:
   Option<ExecutorDriver*> driver;
   string healthCheckDir;
   Option<char**> override;
+  Option<string> sandboxDirectory;
+  Option<string> user;
 };
 
 
 class CommandExecutor: public Executor
 {
 public:
-  CommandExecutor(Option<char**> override, string healthCheckDir)
+  CommandExecutor(
+      const Option<char**>& override,
+      const string& healthCheckDir,
+      const Option<string>& sandboxDirectory,
+      const Option<string>& user)
   {
-    process = new CommandExecutorProcess(override, healthCheckDir);
+    process = new CommandExecutorProcess(
+        override, healthCheckDir, sandboxDirectory, user);
     spawn(process);
   }
 
@@ -595,11 +709,24 @@ public:
         "subsequent 'argv' to be used with 'execvp'",
         false);
 
+    // The following flags are only applicable when a rootfs is provisioned
+    // for this command.
+    add(&sandbox_directory,
+        "sandbox_directory",
+        "The absolute path for the directory in the container where the\n"
+        "sandbox is mapped to");
+
+    add(&user,
+        "user",
+        "The user that the task should be running as.");
+
     // TODO(nnielsen): Add 'prefix' option to enable replacing
     // 'sh -c' with user specified wrapper.
   }
 
   bool override;
+  Option<string> sandbox_directory;
+  Option<string> user;
 };
 
 
@@ -636,7 +763,8 @@ int main(int argc, char** argv)
   string path =
     envPath.isSome() ? envPath.get()
                      : os::realpath(Path(argv[0]).dirname()).get();
-  mesos::internal::CommandExecutor executor(override, path);
+  mesos::internal::CommandExecutor executor(
+      override, path, flags.sandbox_directory, flags.user);
   mesos::MesosExecutorDriver driver(&executor);
   return driver.run() == mesos::DRIVER_STOPPED ? EXIT_SUCCESS : EXIT_FAILURE;
 }

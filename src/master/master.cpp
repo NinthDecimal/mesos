@@ -753,6 +753,12 @@ void Master::initialize()
           Http::log(request);
           return http.scheduler(request);
         });
+  route("/frameworks",
+        Http::FRAMEWORKS(),
+        [http](const process::http::Request& request) {
+          Http::log(request);
+          return http.frameworks(request);
+        });
   route("/flags",
         Http::FLAGS_HELP(),
         [http](const process::http::Request& request) {
@@ -2024,12 +2030,6 @@ void Master::_subscribe(
       LOG(INFO) << "Allowing framework " << *framework
                 << " to subscribe with an already used id";
 
-      // Convert the framework to an http framework if it was
-      // pid based in the past.
-      if (framework->pid.isSome()) {
-        framework->pid = None();
-      }
-
       framework->connected = true;
       framework->updateConnection(http);
 
@@ -2746,8 +2746,8 @@ Resources Master::addTask(
     // TODO(benh): Refactor this code into Slave::addTask.
     if (!slave->hasExecutor(framework->id(), task.executor().executor_id())) {
       CHECK(!framework->hasExecutor(slave->id, task.executor().executor_id()))
-        << "Executor " << task.executor().executor_id()
-        << " known to the framework " << *framework
+        << "Executor '" << task.executor().executor_id()
+        << "' known to the framework " << *framework
         << " but unknown to the slave " << *slave;
 
       slave->addExecutor(framework->id(), task.executor());
@@ -3568,6 +3568,9 @@ void Master::acknowledge(
     return;
   }
 
+  LOG(INFO) << "Processing ACKNOWLEDGE call " << uuid << " for task " << taskId
+            << " of framework " << *framework << " on slave " << slaveId;
+
   Task* task = slave->getTask(framework->id(), taskId);
 
   if (task != NULL) {
@@ -3599,9 +3602,6 @@ void Master::acknowledge(
       removeTask(task);
      }
   }
-
-  LOG(INFO) << "Processing ACKNOWLEDGE call " << uuid << " for task " << taskId
-            << " of framework " << *framework << " on slave " << slaveId;
 
   StatusUpdateAcknowledgementMessage message;
   message.mutable_slave_id()->CopyFrom(slaveId);
@@ -3635,8 +3635,8 @@ void Master::schedulerMessage(
 
   if (framework->pid != from) {
     LOG(WARNING)
-      << "Ignoring framework message for executor " << executorId
-      << " of framework " << *framework
+      << "Ignoring framework message for executor '" << executorId
+      << "' of framework " << *framework
       << " because it is not expected from " << from;
     metrics->invalid_framework_to_executor_messages++;
     return;
@@ -3906,7 +3906,7 @@ void Master::_registerSlave(
         slaveInfo,
         pid,
         machineId,
-        version.empty() ? Option<string>::none() : version,
+        version,
         Clock::now(),
         checkpointedResources);
 
@@ -4149,7 +4149,7 @@ void Master::_reregisterSlave(
         slaveInfo,
         pid,
         machineId,
-        version.empty() ? Option<string>::none() : version,
+        version,
         Clock::now(),
         checkpointedResources,
         executorInfos,
@@ -4374,7 +4374,9 @@ void Master::updateUnavailability(
 
 // TODO(vinod): Since 0.22.0, we can use 'from' instead of 'pid'
 // because the status updates will be sent by the slave.
-void Master::statusUpdate(const StatusUpdate& update, const UPID& pid)
+//
+// TODO(vinod): Add a benchmark test for status update handling.
+void Master::statusUpdate(StatusUpdate update, const UPID& pid)
 {
   ++metrics->messages_status_update;
 
@@ -4416,6 +4418,15 @@ void Master::statusUpdate(const StatusUpdate& update, const UPID& pid)
   }
 
   LOG(INFO) << "Status update " << update << " from slave " << *slave;
+
+  // We ensure that the uuid of task status matches the update's uuid, in case
+  // the task status uuid is not set by the slave.
+  //
+  // TODO(vinod): This can be `CHECK(update.status().has_uuid())` from 0.27.0
+  // since a >= 0.26.0 slave will always correctly set task status uuid.
+  if (update.has_uuid()) {
+    update.mutable_status()->set_uuid(update.uuid());
+  }
 
   // Forward the update to the framework.
   forward(update, pid, framework);
@@ -4508,8 +4519,8 @@ void Master::exitedExecutor(
     return;
   }
 
-  LOG(INFO) << "Executor " << executorId
-            << " of framework " << frameworkId
+  LOG(INFO) << "Executor '" << executorId
+            << "' of framework " << frameworkId
             << " on slave " << *slave << ": "
             << WSTRINGIFY(status);
 
@@ -4685,7 +4696,9 @@ void Master::_reconcileTasks(
           "Reconciliation: Latest task state",
           TaskStatus::REASON_RECONCILIATION,
           executorId,
-          protobuf::getTaskHealth(*task));
+          protobuf::getTaskHealth(*task),
+          None(),
+          protobuf::getTaskContainerStatus(*task));
 
       VLOG(1) << "Sending implicit reconciliation state "
               << update.status().state()
@@ -4760,7 +4773,9 @@ void Master::_reconcileTasks(
           "Reconciliation: Latest task state",
           TaskStatus::REASON_RECONCILIATION,
           executorId,
-          protobuf::getTaskHealth(*task));
+          protobuf::getTaskHealth(*task),
+          None(),
+          protobuf::getTaskContainerStatus(*task));
     } else if (slaveId.isSome() && slaves.registered.contains(slaveId.get())) {
       // (3) Task is unknown, slave is registered: TASK_LOST.
       update = protobuf::createStatusUpdate(
@@ -5238,51 +5253,27 @@ void Master::reconcile(
         LOG(WARNING) << "Task " << task->task_id()
                      << " of framework " << task->framework_id()
                      << " unknown to the slave " << *slave
-                     << " during re-registration"
-                     << (slave->version.isSome()
-                         ? ": reconciling with the slave"
-                         : ": sending TASK_LOST");
+                     << " during re-registration : reconciling with the slave";
 
-        if (slave->version.isSome()) {
-          // NOTE: Currently the slave doesn't look at the task state
-          // when it reconciles the task state; we include the correct
-          // state for correctness and consistency.
-          const TaskState& state = task->has_status_update_state()
-              ? task->status_update_state()
-              : task->state();
+        // NOTE: Currently the slave doesn't look at the task state
+        // when it reconciles the task state; we include the correct
+        // state for correctness and consistency.
+        const TaskState& state = task->has_status_update_state()
+            ? task->status_update_state()
+            : task->state();
 
-          TaskStatus* status = reconcile.add_statuses();
-          status->mutable_task_id()->CopyFrom(task->task_id());
-          status->mutable_slave_id()->CopyFrom(slave->id);
-          status->set_state(state);
-          status->set_source(TaskStatus::SOURCE_MASTER);
-          status->set_message("Reconciliation request");
-          status->set_reason(TaskStatus::REASON_RECONCILIATION);
-          status->set_timestamp(Clock::now().secs());
-        } else {
-          // TODO(bmahler): Remove this case in 0.22.0.
-          const StatusUpdate& update = protobuf::createStatusUpdate(
-              task->framework_id(),
-              slave->id,
-              task->task_id(),
-              TASK_LOST,
-              TaskStatus::SOURCE_MASTER,
-              None(),
-              "Task is unknown to the slave",
-              TaskStatus::REASON_TASK_UNKNOWN);
-
-          updateTask(task, update);
-          removeTask(task);
-
-          Framework* framework = getFramework(frameworkId);
-          if (framework != NULL) {
-            forward(update, UPID(), framework);
-          }
-        }
+        TaskStatus* status = reconcile.add_statuses();
+        status->mutable_task_id()->CopyFrom(task->task_id());
+        status->mutable_slave_id()->CopyFrom(slave->id);
+        status->set_state(state);
+        status->set_source(TaskStatus::SOURCE_MASTER);
+        status->set_message("Reconciliation request");
+        status->set_reason(TaskStatus::REASON_RECONCILIATION);
+        status->set_timestamp(Clock::now().secs());
       }
     }
 
-    if (slave->version.isSome() && reconcile.statuses_size() > 0) {
+    if (reconcile.statuses_size() > 0) {
       reregistered.add_reconciliations()->CopyFrom(reconcile);
     }
   }
@@ -5301,8 +5292,8 @@ void Master::reconcile(
     // in the scheduler driver.
     if (!executor.has_framework_id()) {
       LOG(ERROR) << "Slave " << *slave
-                 << " re-registered with executor " << executor.executor_id()
-                 << " without setting the framework id";
+                 << " re-registered with executor '" << executor.executor_id()
+                 << "' without setting the framework id";
       continue;
     }
     slaveExecutors.put(executor.framework_id(), executor.executor_id());
@@ -5317,8 +5308,8 @@ void Master::reconcile(
         // TODO(bmahler): Reconcile executors correctly between the
         // master and the slave, see:
         // MESOS-1466, MESOS-1800, and MESOS-1720.
-        LOG(WARNING) << "Executor " << executorId
-                     << " of framework " << frameworkId
+        LOG(WARNING) << "Executor '" << executorId
+                     << "' of framework " << frameworkId
                      << " possibly unknown to the slave " << *slave;
 
         removeExecutor(slave, frameworkId, executorId);
@@ -5477,16 +5468,16 @@ void Master::failoverFramework(Framework* framework, const UPID& newPid)
   const Option<UPID> oldPid = framework->pid;
 
   // There are a few failover cases to consider:
-  //   1. The pid has changed. In this case we definitely want to
-  //      send a FrameworkErrorMessage to shut down the older
-  //      scheduler.
+  //   1. The pid has changed or it was previously a HTTP based scheduler.
+  //      In these cases we definitely want to send a FrameworkErrorMessage to
+  //      shut down the older scheduler.
   //   2. The pid has not changed.
   //      2.1 The old scheduler on that pid failed over to a new
   //          instance on the same pid. No need to shut down the old
   //          scheduler as it is necessarily dead.
   //      2.2 This is a duplicate message. In this case, the scheduler
   //          has not failed over, so we do not want to shut it down.
-  if (oldPid.isSome() && oldPid != newPid) {
+  if (oldPid != newPid && framework->connected) {
     FrameworkErrorMessage message;
     message.set_message("Framework failed over");
     framework->send(message);
@@ -6022,18 +6013,10 @@ void Master::updateTask(Task* task, const StatusUpdate& update)
   // Get the unacknowledged status.
   const TaskStatus& status = update.status();
 
-  // Once a task's state has been transitioned to terminal state, no further
-  // terminal updates should result in a state change. These are the same
-  // semantics that are enforced by the slave.
-  if (protobuf::isTerminalState(task->state())) {
-    LOG(ERROR) << "Ignoring status update for the terminated task "
-               << task->task_id()
-               << " (" << task->state() << " -> " << status.state() << ")"
-               << " of framework " << task->framework_id();
-    return;
-  }
+  // NOTE: Refer to comments on `StatusUpdate` message in messages.proto for
+  // the difference between `update.latest_state()` and `status.state()`.
 
-  // Get the latest state.
+  // Updates from the slave have 'latest_state' set.
   Option<TaskState> latestState;
   if (update.has_latest_state()) {
     latestState = update.latest_state();
@@ -6043,24 +6026,30 @@ void Master::updateTask(Task* task, const StatusUpdate& update)
   // transitioned to terminal state. Also set the latest state.
   bool terminated;
   if (latestState.isSome()) {
-    // This update must be from >= 0.21.0 slave.
     terminated = !protobuf::isTerminalState(task->state()) &&
                  protobuf::isTerminalState(latestState.get());
 
-    task->set_state(latestState.get());
+    // If the task has already transitioned to a terminal state,
+    // do not update its state.
+    if (!protobuf::isTerminalState(task->state())) {
+      task->set_state(latestState.get());
+    }
   } else {
-    // This update must be from a pre 0.21.0 slave or generated by the
-    // master.
     terminated = !protobuf::isTerminalState(task->state()) &&
                  protobuf::isTerminalState(status.state());
 
-    task->set_state(status.state());
+    // If the task has already transitioned to a terminal state, do not update
+    // its state. Note that we are being defensive here because this should not
+    // happen unless there is a bug in the master code.
+    if (!protobuf::isTerminalState(task->state())) {
+      task->set_state(status.state());
+    }
   }
 
   // Set the status update state and uuid for the task. Note that
   // master-generated updates are terminal and do not have a uuid
-  // (in which case the master also calls removeTask()).
-  if (update.has_uuid() && update.uuid() != "") {
+  // (in which case the master also calls `removeTask()`).
+  if (update.has_uuid()) {
     task->set_status_update_state(status.state());
     task->set_status_update_uuid(update.uuid());
   }
@@ -6080,12 +6069,10 @@ void Master::updateTask(Task* task, const StatusUpdate& update)
   // MESOS-1746.
   task->mutable_statuses(task->statuses_size() - 1)->clear_data();
 
-  LOG(INFO) << "Updating the latest state of task " << task->task_id()
+  LOG(INFO) << "Updating the state of task " << task->task_id()
             << " of framework " << task->framework_id()
-            << " to " << task->state()
-            << (task->state() != status.state()
-                ? " (status update state: " + stringify(status.state()) + ")"
-                : "");
+            << " (latest state: " << task->state()
+            << ", status update state: " << status.state() << ")";
 
   // Once the task becomes terminal, we recover the resources.
   if (terminated) {

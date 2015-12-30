@@ -259,14 +259,8 @@ JSON::Object model(const Framework& framework)
 
   // Model all of the labels associated with a framework.
   if (framework.info.has_labels()) {
-    JSON::Array array;
     const mesos::Labels labels = framework.info.labels();
-    array.values.reserve(labels.labels_size());
-
-    foreach (const Label& label, labels.labels()) {
-      array.values.push_back(JSON::Protobuf(label));
-    }
-    object.values["labels"] = std::move(array);
+    object.values["labels"] = std::move(JSON::protobuf(labels.labels()));
   }
 
   return object;
@@ -295,6 +289,8 @@ JSON::Object summarize(const Slave& slave)
 
   object.values["attributes"] = model(slave.info.attributes());
   object.values["active"] = slave.active;
+  object.values["version"] = slave.version;
+
   return object;
 }
 
@@ -522,6 +518,63 @@ Future<Response> Master::Http::scheduler(const Request& request) const
   }
 
   return NotImplemented();
+}
+
+
+string Master::Http::FRAMEWORKS()
+{
+  return HELP(TLDR("Exposes the frameworks info."));
+}
+
+
+Future<Response> Master::Http::frameworks(const Request& request) const
+{
+  JSON::Object object;
+
+  // Model all of the frameworks.
+  {
+    JSON::Array array;
+    array.values.reserve(master->frameworks.registered.size()); // MESOS-2353.
+
+    foreachvalue (Framework* framework, master->frameworks.registered) {
+      array.values.push_back(model(*framework));
+    }
+
+    object.values["frameworks"] = std::move(array);
+  }
+
+  // Model all of the completed frameworks.
+  {
+    JSON::Array array;
+    array.values.reserve(master->frameworks.completed.size()); // MESOS-2353.
+
+    foreach (const std::shared_ptr<Framework>& framework,
+             master->frameworks.completed) {
+      array.values.push_back(model(*framework));
+    }
+
+    object.values["completed_frameworks"] = std::move(array);
+  }
+
+  // Model all currently unregistered frameworks.
+  // This could happen when the framework has yet to re-register
+  // after master failover.
+  {
+    JSON::Array array;
+
+    // Find unregistered frameworks.
+    foreachvalue (const Slave* slave, master->slaves.registered) {
+      foreachkey (const FrameworkID& frameworkId, slave->tasks) {
+        if (!master->frameworks.registered.contains(frameworkId)) {
+          array.values.push_back(frameworkId.value());
+        }
+      }
+    }
+
+    object.values["unregistered_frameworks"] = std::move(array);
+  }
+
+  return OK(object, request.url.query.get("jsonp"));
 }
 
 
@@ -1519,7 +1572,7 @@ Future<Response> Master::Http::maintenanceSchedule(const Request& request) const
         mesos::maintenance::Schedule() :
         master->maintenance.schedules.front();
 
-    return OK(JSON::Protobuf(schedule), request.url.query.get("jsonp"));
+    return OK(JSON::protobuf(schedule), request.url.query.get("jsonp"));
   }
 
   // Parse the POST body as JSON.
@@ -1652,13 +1705,13 @@ Future<Response> Master::Http::machineDown(const Request& request) const
   foreach (const MachineID& id, ids.get()) {
     if (!master->machines.contains(id)) {
       return BadRequest(
-          "Machine '" + stringify(JSON::Protobuf(id)) +
+          "Machine '" + stringify(JSON::protobuf(id)) +
             "' is not part of a maintenance schedule");
     }
 
     if (master->machines[id].info.mode() != MachineInfo::DRAINING) {
       return BadRequest(
-          "Machine '" + stringify(JSON::Protobuf(id)) +
+          "Machine '" + stringify(JSON::protobuf(id)) +
             "' is not in DRAINING mode and cannot be brought down");
     }
   }
@@ -1753,13 +1806,13 @@ Future<Response> Master::Http::machineUp(const Request& request) const
   foreach (const MachineID& id, ids.get()) {
     if (!master->machines.contains(id)) {
       return BadRequest(
-          "Machine '" + stringify(JSON::Protobuf(id)) +
+          "Machine '" + stringify(JSON::protobuf(id)) +
             "' is not part of a maintenance schedule");
     }
 
     if (master->machines[id].info.mode() != MachineInfo::DOWN) {
       return BadRequest(
-          "Machine '" + stringify(JSON::Protobuf(id)) +
+          "Machine '" + stringify(JSON::protobuf(id)) +
             "' is not in DOWN mode and cannot be brought up");
     }
   }
@@ -1883,7 +1936,7 @@ Future<Response> Master::Http::maintenanceStatus(const Request& request) const
       }
     }
 
-    return OK(JSON::Protobuf(status), request.url.query.get("jsonp"));
+    return OK(JSON::protobuf(status), request.url.query.get("jsonp"));
   }));
 }
 

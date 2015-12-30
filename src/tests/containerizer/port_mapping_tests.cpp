@@ -16,11 +16,11 @@
  * limitations under the License.
  */
 
-#include <gmock/gmock.h>
-
 #include <iostream>
 #include <string>
 #include <vector>
+
+#include <gmock/gmock.h>
 
 #include <process/future.hpp>
 #include <process/io.hpp>
@@ -56,7 +56,7 @@
 #include "slave/flags.hpp"
 #include "slave/slave.hpp"
 
-#include "slave/containerizer/isolators/network/port_mapping.hpp"
+#include "slave/containerizer/mesos/isolators/network/port_mapping.hpp"
 
 #include "slave/containerizer/fetcher.hpp"
 #include "slave/containerizer/launcher.hpp"
@@ -309,7 +309,7 @@ protected:
     // The flags to pass to the helper process.
     MesosContainerizerLaunch::Flags launchFlags;
 
-    launchFlags.command = JSON::Protobuf(commandInfo);
+    launchFlags.command = JSON::protobuf(commandInfo);
     launchFlags.directory = os::getcwd();
 
     CHECK_SOME(os::user());
@@ -324,7 +324,7 @@ protected:
 
     JSON::Object commands;
     JSON::Array array;
-    array.values.push_back(JSON::Protobuf(preparation.get().commands(0)));
+    array.values.push_back(JSON::protobuf(preparation.get().commands(0)));
     commands.values["commands"] = array;
 
     launchFlags.commands = commands;

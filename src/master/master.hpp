@@ -111,7 +111,7 @@ struct Slave
   Slave(const SlaveInfo& _info,
         const process::UPID& _pid,
         const MachineID& _machineId,
-        const Option<std::string> _version,
+        const std::string& _version,
         const process::Time& _registeredTime,
         const Resources& _checkpointedResources,
         const std::vector<ExecutorInfo> executorInfos =
@@ -263,8 +263,8 @@ struct Slave
                    const ExecutorInfo& executorInfo)
   {
     CHECK(!hasExecutor(frameworkId, executorInfo.executor_id()))
-      << "Duplicate executor " << executorInfo.executor_id()
-      << " of framework " << frameworkId;
+      << "Duplicate executor '" << executorInfo.executor_id()
+      << "' of framework " << frameworkId;
 
     executors[frameworkId][executorInfo.executor_id()] = executorInfo;
     usedResources[frameworkId] += executorInfo.resources();
@@ -274,7 +274,7 @@ struct Slave
                       const ExecutorID& executorId)
   {
     CHECK(hasExecutor(frameworkId, executorId))
-      << "Unknown executor " << executorId << " of framework " << frameworkId;
+      << "Unknown executor '" << executorId << "' of framework " << frameworkId;
 
     usedResources[frameworkId] -=
       executors[frameworkId][executorId].resources();
@@ -303,10 +303,8 @@ struct Slave
 
   process::UPID pid;
 
-  // The Mesos version of the slave. If set, the slave is >= 0.21.0.
   // TODO(bmahler): Use stout's Version when it can parse labels, etc.
-  // TODO(bmahler): Make this required once it is always set.
-  const Option<std::string> version;
+  const std::string version;
 
   process::Time registeredTime;
   Option<process::Time> reregisteredTime;
@@ -468,7 +466,7 @@ public:
       const SlaveID& slaveId);
 
   void statusUpdate(
-      const StatusUpdate& update,
+      StatusUpdate update,
       const process::UPID& pid);
 
   void reconcileTasks(
@@ -855,6 +853,10 @@ private:
     process::Future<process::http::Response> flags(
         const process::http::Request& request) const;
 
+    // /master/frameworks
+    process::Future<process::http::Response> frameworks(
+        const process::http::Request& request) const;
+
     // /master/health
     process::Future<process::http::Response> health(
         const process::http::Request& request) const;
@@ -917,6 +919,7 @@ private:
 
     static std::string SCHEDULER_HELP();
     static std::string FLAGS_HELP();
+    static std::string FRAMEWORKS();
     static std::string HEALTH_HELP();
     static std::string OBSERVE_HELP();
     static std::string REDIRECT_HELP();
@@ -1622,8 +1625,8 @@ struct Framework
                    const ExecutorInfo& executorInfo)
   {
     CHECK(!hasExecutor(slaveId, executorInfo.executor_id()))
-      << "Duplicate executor " << executorInfo.executor_id()
-      << " on slave " << slaveId;
+      << "Duplicate executor '" << executorInfo.executor_id()
+      << "' on slave " << slaveId;
 
     executors[slaveId][executorInfo.executor_id()] = executorInfo;
     totalUsedResources += executorInfo.resources();
@@ -1634,8 +1637,8 @@ struct Framework
                       const ExecutorID& executorId)
   {
     CHECK(hasExecutor(slaveId, executorId))
-      << "Unknown executor " << executorId
-      << " of framework " << id()
+      << "Unknown executor '" << executorId
+      << "' of framework " << id()
       << " of slave " << slaveId;
 
     totalUsedResources -= executors[slaveId][executorId].resources();

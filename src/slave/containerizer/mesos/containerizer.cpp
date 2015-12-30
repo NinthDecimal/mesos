@@ -47,36 +47,35 @@
 #include "slave/containerizer/linux_launcher.hpp"
 #endif
 
-#include "slave/containerizer/isolators/posix.hpp"
+#include "slave/containerizer/mesos/isolators/posix.hpp"
 
-#include "slave/containerizer/isolators/posix/disk.hpp"
+#include "slave/containerizer/mesos/isolators/posix/disk.hpp"
 
 #ifdef __linux__
-#include "slave/containerizer/isolators/cgroups/cpushare.hpp"
-#include "slave/containerizer/isolators/cgroups/mem.hpp"
-#include "slave/containerizer/isolators/cgroups/perf_event.hpp"
+#include "slave/containerizer/mesos/isolators/cgroups/cpushare.hpp"
+#include "slave/containerizer/mesos/isolators/cgroups/mem.hpp"
+#include "slave/containerizer/mesos/isolators/cgroups/perf_event.hpp"
 #endif
 
 #ifdef __linux__
-#include "slave/containerizer/isolators/filesystem/linux.hpp"
+#include "slave/containerizer/mesos/isolators/filesystem/linux.hpp"
 #endif
-#include "slave/containerizer/isolators/filesystem/posix.hpp"
+#include "slave/containerizer/mesos/isolators/filesystem/posix.hpp"
 #ifdef __linux__
-#include "slave/containerizer/isolators/filesystem/shared.hpp"
+#include "slave/containerizer/mesos/isolators/filesystem/shared.hpp"
 #endif
 
 #ifdef __linux__
-#include "slave/containerizer/isolators/namespaces/pid.hpp"
+#include "slave/containerizer/mesos/isolators/namespaces/pid.hpp"
 #endif
 
 #ifdef WITH_NETWORK_ISOLATOR
-#include "slave/containerizer/isolators/network/port_mapping.hpp"
+#include "slave/containerizer/mesos/isolators/network/port_mapping.hpp"
 #endif
 
 #include "slave/containerizer/mesos/containerizer.hpp"
 #include "slave/containerizer/mesos/launch.hpp"
-
-#include "slave/containerizer/provisioner/provisioner.hpp"
+#include "slave/containerizer/mesos/provisioner/provisioner.hpp"
 
 using std::list;
 using std::map;
@@ -226,9 +225,8 @@ Try<MesosContainerizer*> MesosContainerizer::create(
       return Error("Unknown or unsupported launcher: " + flags_.launcher.get());
     }
   } else {
-    // If the user has not specified the launcher, use Linux launcher
-    // if running as root, posix launcher otherwise.
-    launcher = (::geteuid() == 0)
+    // Use Linux launcher if it is available, POSIX otherwise.
+    launcher = LinuxLauncher::available()
       ? LinuxLauncher::create(flags_)
       : PosixLauncher::create(flags_);
   }
@@ -304,6 +302,7 @@ Future<bool> MesosContainerizer::launch(
   return dispatch(process.get(),
                   &MesosContainerizerProcess::launch,
                   containerId,
+                  None(),
                   executorInfo,
                   directory,
                   user,
@@ -565,33 +564,6 @@ void MesosContainerizerProcess::___recover(
 }
 
 
-Future<bool> MesosContainerizerProcess::launch(
-    const ContainerID& containerId,
-    const TaskInfo& taskInfo,
-    const ExecutorInfo& executorInfo,
-    const string& directory,
-    const Option<string>& user,
-    const SlaveID& slaveId,
-    const PID<Slave>& slavePid,
-    bool checkpoint)
-{
-  if (taskInfo.has_container()) {
-    // We return false as this containerizer does not support
-    // handling TaskInfo::ContainerInfo.
-    return false;
-  }
-
-  return launch(
-      containerId,
-      executorInfo,
-      directory,
-      user,
-      slaveId,
-      slavePid,
-      checkpoint);
-}
-
-
 // Launching an executor involves the following steps:
 // 1. Call prepare on each isolator.
 // 2. Fork the executor. The forked child is blocked from exec'ing until it has
@@ -603,6 +575,7 @@ Future<bool> MesosContainerizerProcess::launch(
 //    executor.
 Future<bool> MesosContainerizerProcess::launch(
     const ContainerID& containerId,
+    const Option<TaskInfo>& taskInfo,
     const ExecutorInfo& _executorInfo,
     const string& directory,
     const Option<string>& user,
@@ -612,6 +585,12 @@ Future<bool> MesosContainerizerProcess::launch(
 {
   if (containers_.contains(containerId)) {
     return Failure("Container already started");
+  }
+
+  if (taskInfo.isSome() &&
+      taskInfo.get().has_container() &&
+      taskInfo.get().container().type() != ContainerInfo::MESOS) {
+    return false;
   }
 
   // NOTE: We make a copy of the executor info because we may mutate
@@ -797,7 +776,7 @@ Future<bool> MesosContainerizerProcess::_launch(
     // Populate the list of additional commands to be run inside the container
     // context.
     foreach (const CommandInfo& command, prepareInfo.get().commands()) {
-      commandArray.values.push_back(JSON::Protobuf(command));
+      commandArray.values.emplace_back(JSON::protobuf(command));
     }
 
     // Process additional environment variables returned by isolators.
@@ -827,7 +806,7 @@ Future<bool> MesosContainerizerProcess::_launch(
   // Prepare the flags to pass to the launch process.
   MesosContainerizerLaunch::Flags launchFlags;
 
-  launchFlags.command = JSON::Protobuf(executorInfo.command());
+  launchFlags.command = JSON::protobuf(executorInfo.command());
 
   launchFlags.directory = rootfs.isSome() ? flags.sandbox_directory : directory;
   launchFlags.rootfs = rootfs;
@@ -1219,7 +1198,7 @@ void MesosContainerizerProcess::____destroy(
     if (!cleanup.isReady()) {
       container->promise.fail(
           "Failed to clean up an isolator when destroying container '" +
-          stringify(containerId) + "' :" +
+          stringify(containerId) + "': " +
           (cleanup.isFailed() ? cleanup.failure() : "discarded future"));
 
       containers_.erase(containerId);

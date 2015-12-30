@@ -176,6 +176,13 @@ public:
   void reviveOffers(
       const FrameworkID& frameworkId);
 
+  void setQuota(
+      const std::string& role,
+      const mesos::quota::QuotaInfo& quota);
+
+  void removeQuota(
+      const std::string& role);
+
 protected:
   // Useful typedefs for dispatch/delay/defer to self()/this.
   typedef HierarchicalAllocatorProcess Self;
@@ -327,7 +334,7 @@ protected:
       // master being invalidated, and new offers being sent out.
       hashmap<FrameworkID, mesos::master::InverseOfferStatus> statuses;
 
-      // Represent the "unit of accounting" for maintenance. When a
+      // Represents the "unit of accounting" for maintenance. When a
       // `FrameworkID` is present in the hashset it means an inverse offer has
       // been sent out. When it is not present it means no offer is currently
       // outstanding.
@@ -383,7 +390,6 @@ public:
           []() -> Sorter* { return new RoleSorter(); },
           []() -> Sorter* { return new FrameworkSorter(); }) {}
 };
-
 
 } // namespace allocator {
 } // namespace master {
